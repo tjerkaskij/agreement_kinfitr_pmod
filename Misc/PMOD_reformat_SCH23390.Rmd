@@ -1,0 +1,204 @@
+---
+title: "PMOD_reformat_SCH23390"
+author: "Jonathan Tjerkaski"
+date: "14 June 2019"
+output: 
+  pdf_document:
+    toc: yes
+    toc_depth: 3
+  md_document:
+    toc: yes
+    toc_depth: 3
+    variant: markdown_github
+---
+
+# Libraries
+
+## CRAN libraries
+
+First, the libraries for the analysis and plotting are loaded.
+
+```{r cran_packages, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(stringr)
+library(corrplot)
+library(grid)
+library(gridExtra)
+library(RColorBrewer)
+library(psych)
+library(readxl)
+library(pracma)
+library(lme4)
+library(rjags)
+library(knitr)
+library(cowplot)
+library(corrplot)
+library(viridis)
+
+```
+
+### Loading Non_CRAN libraries and setting theme
+
+```{r load_github_packages, message=FALSE}
+
+library(kinfitr)
+library(vmisc)
+library(kipettools)
+library(granviller)
+library(relfeas)
+
+theme_set(theme_light())
+```
+
+# Extracting kinfitresults
+
+```{r Extracting_kinfitresults, eval=FALSE}
+
+
+ tactibble <- tibble(Filename = list.files(path = "../RawData/", 
+                                           pattern = "kinfitresults.mat")) %>% 
+  group_by(Filename) %>% 
+  mutate(tacdata = map(Filename, ~kipettools::kfresults_getData(
+    paste0("../RawData/", .x))))
+
+saveRDS(tactibble, '../DerivedData/tactibble.rds')
+
+
+```
+
+# Tidying data. 
+
+```{r Tidying_data}
+
+#loading data
+
+tacs <- readRDS('../DerivedData/tactibble.rds')
+
+tacs <- tacs %>% 
+  ungroup() %>% 
+  mutate(Subjname = map_chr(tacdata, "Subjname"),
+         PETNo = map_dbl(tacdata, "PETNo"),
+         tacdata = map(tacdata, "tacdata")) %>% 
+  select(-Filename) 
+
+   
+
+```
+
+
+```{r}
+
+regions <- c("STR" = "FSLSSTR", "FC" = "FSLSFC", "WB","CBL" = "gmCBL",        "TC" = "FSLSTC", "THA" = "FSLSTHA")
+ 
+tacs <- tacs %>% 
+  select(tacdata, Subjname, PETNo) %>% 
+  mutate(tacdata = map(tacdata, ~select(.x, regions, times, durations, weights))) 
+
+tacs_long <- tacs %>% 
+  unnest(tacdata) %>% 
+  mutate(PET = paste(Subjname, PETNo, sep='_')) 
+
+```
+
+# Start time, End time and removing first row
+
+```{r}
+
+#Removing first row
+
+tacs_long <- tacs_long %>% 
+  group_by(PET) %>% 
+  slice(-1) %>% 
+  ungroup()
+
+#Converting units from minutes to seconds
+
+tacs_long <- tacs_long %>% 
+  mutate(times = times * 60) %>% 
+  mutate(durations = durations * 60)
+
+#Creating start time and end time
+
+tacs_long <- tacs_long %>% 
+  mutate("start[seconds]" = times - (durations/2)) %>% 
+  mutate("end[nCi/cc]" = times + (durations/2))
+
+#Select Start, End and the region tacs for PMOD. also, keep PET column for ID
+
+tacs_long <-  tacs_long %>% 
+  select(`start[seconds]`, `end[nCi/cc]`, STR:THA, PET)
+  
+
+```
+
+#Saving each individuals TAC into a seperate excel file according to the PMOD 
+
+
+```{r}
+
+#Group by and nest
+
+tacs_long <- tacs_long %>% 
+  mutate(PET = paste( PET, "tac", sep='_')) %>% 
+  group_by(PET) %>% 
+  nest(.key = tac)
+
+#Create a named list with PET as the name and the nested data frames as content
+
+TAC <- as.list(tacs_long$tac)
+names(TAC) <- tacs_long$PET
+
+#Create a new directory for the .csv files
+
+#dir.create("../PMOD_SCH23390")
+
+dir <- "../PMOD_SCH23390"
+
+#use purr with write_csv
+
+# TAC %>% 
+  # names(.) %>% 
+  # map(~ write_csv(TAC[[.]], file.path(dir, paste0(., ".csv")))) 
+
+```
+
+
+#Creating .txt files
+
+```{r eval = FALSE}
+
+oldwd <- getwd()
+
+dir.create("../txt_PMOD_SCH23390")
+
+txt_dir <- "../txt_PMOD_SCH23390"
+
+setwd(txt_dir)
+
+map2(.x = tacs_long$tac, .y = tacs_long$PET, .f = ~ write.table(x = .x, file = paste0(.y, ".txt") , quote = FALSE, row.names = F))
+
+setwd(oldwd)
+
+```
+
+Note: got some strange message "[[1]]NULL" when generating the text files, but the files themselves look fine
+
+#Creating tab delimited files
+
+```{r eval = FALSE}
+
+oldwd <- getwd()
+
+dir.create("../tab_delim_PMOD_SCH23390")
+
+tab_dir <- "../tab_delim_PMOD_SCH23390"
+
+setwd(tab_dir)
+
+map2(.x = tacs_long$tac, .y = tacs_long$PET, .f = ~ write.table(x = .x, file = paste0(.y, ".txt") , quote = FALSE, sep="\t", row.names = F))
+
+setwd(oldwd)
+
+```
+
+Note: got some strange message "[[1]]NULL" when generating the text files, but the files themselves look fine. SAME AS ABOVE.

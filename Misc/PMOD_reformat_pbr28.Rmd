@@ -1,0 +1,219 @@
+---
+title: "PMOD_reformat_pbr28"
+author: "Jonathan Tjerkaski"
+date: "15 June 2019"
+output: output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+```
+
+#packages
+
+```{r cran_packages}
+
+library(stringr)
+library(corrplot)
+library(grid)
+library(gridExtra)
+library(RColorBrewer)
+library(psych)
+library(readxl)
+library(pracma)
+library(lme4)
+library(rjags)
+library(knitr)
+library(cowplot)
+library(corrplot)
+library(kableExtra)
+library(tidyverse)
+
+```
+
+### Loading Non_CRAN libraries and setting theme
+
+```{r load_github_packages}
+
+library(kinfitr)
+library(vmisc)
+library(kipettools)
+library(granviller)
+library(relfeas)
+library(pander)
+
+theme_set(theme_light())
+
+```
+
+#Read data
+
+```{r}
+
+tacs <- readRDS('DerivedData/tacs.rds')
+
+tacs <- tacs %>% 
+  select(PET, tacdata, blooddata)
+
+```
+
+#Creating excel files for the TAC
+
+```{r}
+
+TAC <- tacs %>%
+select(PET,tacdata) %>% 
+unnest(tacdata) %>% 
+select(PET, "start[seconds]" = StartTime, Duration, WB, FC, THA, STR,CBL,TC) %>% 
+group_by(PET) %>% 
+  slice(-1) %>% 
+  ungroup()
+
+TAC <- TAC %>% 
+  mutate("end[nCi/cc]" = `start[seconds]` + Duration) %>% 
+  select(`start[seconds]`, `end[nCi/cc]`, WB:TC, PET)
+
+#Group by and nest
+
+TAC <- TAC %>% 
+  mutate(PET = paste( PET, "tac", sep='_')) %>% 
+  group_by(PET) %>% 
+  nest(.key = tac)
+
+#Create a named list with PET as the name and the nested data frames as content
+
+TACs <- as.list(TAC$tac)
+names(TACs) <- TAC$PET
+
+#Create a new directory for the .csv files
+
+dir.create("../PMOD_pbr28")
+
+dir <- "../PMOD_pbr28"
+
+#use purr with write_csv
+
+TACs %>%
+names(.) %>%
+map(~ write_csv(TACs[[.]], file.path(dir, paste0(., ".csv"))))
+
+```
+
+#Creating excel files for each individuals AIF
+
+```{r}
+
+#unnesting blood data
+
+input <- tacs %>% 
+  select(PET, blooddata) %>% 
+  unnest(blooddata) %>% 
+  select("sample-time[seconds]" = ABSS.sec, "plasma[kBq/cc]" = "Cpl..metabcorr.", PET) %>% 
+  mutate("plasma[kBq/cc]" = round(unit_convert(`plasma[kBq/cc]`, "nCi", "kBq")))
+
+#Group by and nest again, after selecting relevant columns
+
+input <- input %>% 
+  mutate(PET = paste( PET, "input", sep='_')) %>% 
+  group_by(PET) %>% 
+  nest(.key = aif)
+
+#Create  named lists for easy "map" with purr. map2 did not work as easilly
+
+Input <- as.list(input$aif)
+names(Input) <- input$PET
+
+#Save files
+
+Input %>% 
+  names(.) %>% 
+  map(~ write_csv(Input[[.]], file.path(dir, paste0(., ".csv")))) 
+
+```
+
+#Creating excel files for each individuals whole-data.
+
+```{r}
+
+#unnesting blood data
+
+blood <- tacs %>% 
+  select(PET, blooddata) %>% 
+  unnest(blooddata) %>% 
+  select("sample-time[seconds]" = ABSS.sec, "whole-blood[kBq/cc]" = Cbl.disp.corr, PET) %>% 
+  mutate("whole-blood[kBq/cc]" = round(unit_convert(`whole-blood[kBq/cc]`, "nCi", "kBq"))) 
+
+
+#Group by and nest again, after selecting relevant columns
+
+blood <- blood %>% 
+  mutate(PET = paste( PET, "wb", sep='_')) %>% 
+  group_by(PET) %>% 
+  nest(.key = wb)
+
+#Create  named lists for easy "map" with purr. map2 did not work as easilly
+
+whole_blood <- as.list(blood$wb)
+names(whole_blood) <- blood$PET
+
+#Save files
+
+whole_blood %>% 
+  names(.) %>% 
+  map(~ write_csv(whole_blood[[.]], file.path(dir, paste0(., ".csv"))))  
+
+```
+
+#Creating .txt files
+
+```{r}
+
+oldwd <- getwd()
+
+dir.create("../txt_PMOD_pbr28")
+
+txt_dir <- "../txt_PMOD_pbr28"
+
+setwd(txt_dir)
+
+map2(.x = TAC$tac, .y = TAC$PET, .f = ~ write.table(x = .x, file = paste0(.y, ".txt") , quote = FALSE, row.names = F))
+
+map2(.x = input$aif, .y = input$PET, .f = ~ write.table(x = .x, file = paste0(.y, ".txt") , quote = FALSE, row.names = F))
+
+map2(.x = blood$wb, .y = blood$PET, .f = ~ write.table(x = .x, file = paste0(.y, ".txt") , quote = FALSE, row.names = F))
+
+setwd(oldwd)
+
+```
+
+Note: got some strange message "[[1]]NULL" when generating the text files, but the files themselves look fine
+
+#Creating tab delimited files
+
+```{r}
+
+oldwd <- getwd()
+
+dir.create("../tab_delim_PMOD_pbr28")
+
+tab_dir <- "../tab_delim_PMOD_pbr28"
+
+setwd(tab_dir)
+
+map2(.x = TAC$tac, .y = TAC$PET, .f = ~ write.table(x = .x, file = paste0(.y, ".txt") , quote = FALSE, sep="\t", row.names = F))
+
+map2(.x = input$aif, .y = input$PET, .f = ~ write.table(x = .x, file = paste0(.y, ".txt") , quote = FALSE, sep="\t", row.names = F))
+
+map2(.x = blood$wb, .y = blood$PET, .f = ~ write.table(x = .x, file = paste0(.y, ".txt") , quote = FALSE, sep="\t", row.names = F))
+
+
+setwd(oldwd)
+
+```
+
+
